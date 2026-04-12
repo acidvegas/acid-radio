@@ -1,0 +1,4 @@
+# ACID RADIO - Developed by acidvegas in Python (https://git.supernets.org/acidvegas/acid-radio)
+# acid-radio/requirements.txt
+
+mutagen
