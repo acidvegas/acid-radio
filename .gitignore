@@ -1,0 +1,8 @@
+# ACID RADIO - Developed by acidvegas in Python (https://git.supernets.org/acidvegas/acid-radio)
+# acid-radio/.gitignore
+
+data/
+bot/ignores.json
+bot/.env
+music/
+__pycache__/
