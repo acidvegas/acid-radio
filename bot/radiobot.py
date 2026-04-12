@@ -37,6 +37,7 @@ USER              = 'radio'
 REALNAME          = 'https://radio.acid.vegas'
 CHANNEL           = '#superbowl'
 RADIO_URL         = 'https://radio.acid.vegas'
+USER_AGENT        = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 ANNOUNCE_INTERVAL = 14_400 # 4 hours
 COOLDOWN          = 3
 BOT_CLIENT_ID     = 'irc-bot'
@@ -67,7 +68,8 @@ def is_ignored(source, ignores):
 
 
 def api_get(path):
-	with urllib.request.urlopen(f'{RADIO_URL}{path}', timeout=5) as r:
+	req = urllib.request.Request(f'{RADIO_URL}{path}', headers={'User-Agent': USER_AGENT})
+	with urllib.request.urlopen(req, timeout=5) as r:
 		return json.loads(r.read())
 
 
@@ -76,7 +78,7 @@ def api_post(path, body):
 	req = urllib.request.Request(
 		f'{RADIO_URL}{path}',
 		data=data,
-		headers={'Content-Type': 'application/json'},
+		headers={'Content-Type': 'application/json', 'User-Agent': USER_AGENT},
 	)
 	with urllib.request.urlopen(req, timeout=5) as r:
 		return json.loads(r.read())
