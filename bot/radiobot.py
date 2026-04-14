@@ -6,6 +6,7 @@ import asyncio
 import fnmatch
 import json
 import os
+import random
 import re
 import time
 import urllib.parse
@@ -90,9 +91,10 @@ def get_now_playing():
 		if not data:
 			return None
 		return {
-			'artist': data['artist'],
-			'track': data['track'],
-			'genre': data.get('genre') or 'unknown',
+			'artist':   data['artist'],
+			'track':    data['track'],
+			'genre':    data.get('genre') or 'unknown',
+			'folder':   data.get('folder', ''),
 			'song_key': data['folder'] + '/' + data['file'],
 		}
 	except Exception as e:
@@ -138,7 +140,7 @@ def format_np(np, votes, listeners):
 		f'\x02{irc_color(np["artist"], 3)}\x02 - '
 		f'{irc_color(np["track"], 7)} '
 		f'[{irc_color(np["genre"], 6)}] '
-		f'👍 {irc_color(str(votes["up"]), 3)} '
+		f'🤘 {irc_color(str(votes["up"]), 3)} '
 		f'👎 {irc_color(str(votes["down"]), 4)} '
 		f'({irc_color(str(listeners) + " listening", 14)}) '
 		f'🎵 '
@@ -152,12 +154,29 @@ def format_announce(np, votes, listeners):
 		f'\x02{irc_color(np["artist"], 3)}\x02 - '
 		f'{irc_color(np["track"], 7)} '
 		f'[{irc_color(np["genre"], 6)}] '
-		f'👍 {irc_color(str(votes["up"]), 3)} '
+		f'🤘 {irc_color(str(votes["up"]), 3)} '
 		f'👎 {irc_color(str(votes["down"]), 4)} '
 		f'({irc_color(str(listeners) + " listening", 14)}) '
 		f'🎵 '
 		f'\x1f{RADIO_URL}\x1f'
 	)
+
+
+def format_radio_help():
+	c  = irc_color
+	u  = '\x1f'  # underline
+	b  = '\x02'  # bold
+	lines = [
+		f'{b}{c("ACID RADIO", 3)}{b}  {c("HARDCORE x HEAVY x PUNK", 14)}',
+		f'{c("Tune In:", 14)}  {u}{c(RADIO_URL, 12)}{u}  {c("|", 14)}  {c("Source:", 14)}  {u}{c("https://git.supernets.org/acidvegas/acid-radio", 12)}{u}',
+		f'{c("─" * 42, 14)}',
+		f'  {b}{c("!np", 12)}{b}{"":42}{c("»", 14)}  now playing, genre, votes & listeners',
+		f'  {b}{c("!like", 12)}{b}{"":40}{c("»", 14)}  vote up the current song  🤘',
+		f'  {b}{c("!dislike", 12)}{b}{"":37}{c("»", 14)}  vote down the current song  👎',
+		f'  {b}{c("@radio", 12)}{b}{"":39}{c("»", 14)}  show this help',
+		f'  {b}{c("@radio download", 12)}{b} {c("<url> <band> <song> <genre>", 7)}  {c("»", 14)}  download youtube url as mp3  {c("(admin only)", 14)}',
+	]
+	return lines
 
 
 def parse_source(raw):
@@ -312,8 +331,9 @@ async def main():
 				if now - last_cmd < COOLDOWN:
 					continue
 				last_cmd = now
-				privmsg(f'🎵 {RADIO_URL}')
-				await writer.drain()
+				for line in format_radio_help():
+					privmsg(line)
+					await writer.drain()
 				continue
 
 			if cmd not in ('!np', '!like', '!dislike'):
@@ -344,7 +364,17 @@ async def main():
 				else:
 					result = cast_vote(np['song_key'], 'up')
 					if result:
-						privmsg(f'👍 {irc_color(str(result["up"]), 3)} 👎 {irc_color(str(result["down"]), 4)}')
+						nick = source.split('!')[0]
+						privmsg(f'🤘 {irc_color(str(result["up"]), 3)} 👎 {irc_color(str(result["down"]), 4)}')
+						if random.random() < 0.10:
+							is_hardcore   = np['genre'] == 'Hardcore'
+							is_tony_hawks = np.get('folder', '') == 'Tony Hawks'
+							if is_hardcore and random.random() < 0.50:
+								send(f'PRIVMSG {CHANNEL} :\x01ACTION spinkicks {nick}\x01')
+							elif is_tony_hawks and random.random() < 0.50:
+								send(f'PRIVMSG {CHANNEL} :\x01ACTION \U0001f6f9 kickflips over {nick}\x01')
+							else:
+								privmsg(f'!beer {nick}')
 					else:
 						privmsg('❌ failed to cast vote')
 				await writer.drain()
@@ -360,7 +390,7 @@ async def main():
 				else:
 					result = cast_vote(np['song_key'], 'down')
 					if result:
-						privmsg(f'👍 {irc_color(str(result["up"]), 3)} 👎 {irc_color(str(result["down"]), 4)}')
+						privmsg(f'🤘 {irc_color(str(result["up"]), 3)} 👎 {irc_color(str(result["down"]), 4)}')
 					else:
 						privmsg('❌ failed to cast vote')
 				await writer.drain()
