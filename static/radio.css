@@ -1,3 +1,41 @@
+/* Self-hosted so a reload with no signal never blocks on fonts.googleapis.com */
+@font-face {
+	font-family: 'Bebas Neue';
+	font-style: normal;
+	font-weight: 400;
+	font-display: swap;
+	src: url(/fonts/bebasneue-latin.woff2) format('woff2');
+	unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+	font-family: 'Bebas Neue';
+	font-style: normal;
+	font-weight: 400;
+	font-display: swap;
+	src: url(/fonts/bebasneue-latin-ext.woff2) format('woff2');
+	unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+	font-family: 'Rubik Glitch';
+	font-style: normal;
+	font-weight: 400;
+	font-display: swap;
+	src: url(/fonts/rubikglitch-latin.woff2) format('woff2');
+	unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+	font-family: 'Rubik Glitch';
+	font-style: normal;
+	font-weight: 400;
+	font-display: swap;
+	src: url(/fonts/rubikglitch-latin-ext.woff2) format('woff2');
+	unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+
 * {
 	margin: 0;
 	padding: 0;
@@ -383,6 +421,53 @@ body.shake {
 }
 
 
+/* ── lyrics ── */
+
+/* Fixed height with the active line parked in the middle. LYRIC_LINE_H in
+   radio.js must match --lyric-line-h or the scroll offset drifts. */
+#lyrics {
+	--lyric-line-h: 28px;
+	height: calc(var(--lyric-line-h) * 5);
+	width: 100%;
+	margin-top: 20px;
+	overflow: hidden;
+	position: relative;
+	-webkit-mask-image: linear-gradient(to bottom, transparent, #000 22%, #000 78%, transparent);
+	mask-image: linear-gradient(to bottom, transparent, #000 22%, #000 78%, transparent);
+}
+
+#lyrics-inner {
+	transition: transform 0.35s cubic-bezier(0.25, 0.1, 0.25, 1);
+	will-change: transform;
+}
+
+.lyric-line {
+	height: var(--lyric-line-h);
+	line-height: var(--lyric-line-h);
+	font-family: 'Bebas Neue', 'Impact', sans-serif;
+	font-size: 17px;
+	letter-spacing: 1px;
+	color: #555;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	transition: color 0.25s ease, opacity 0.25s ease;
+	opacity: 0.55;
+}
+
+.lyric-line.active {
+	color: #0daa1e;
+	opacity: 1;
+	text-shadow: 0 0 12px rgba(13, 170, 30, 0.45);
+}
+
+/* Lyrics are a distraction while driving, and car mode hides the rest of the
+   chrome for the same reason. */
+body.car-mode #lyrics {
+	display: none !important;
+}
+
+
 /* ── progress ── */
 
 #progress-row {
@@ -519,7 +604,8 @@ body.car-mode #now-track {
 
 /* ── buffering ── */
 
-#buffering {
+#buffering,
+#skipping {
 	position: fixed;
 	bottom: 20px;
 	left: 50%;
@@ -530,4 +616,10 @@ body.car-mode #now-track {
 	letter-spacing: 3px;
 	z-index: 50;
 	pointer-events: none;
+}
+
+/* Sits above BUFFERING so the two never overlap when both are showing */
+#skipping {
+	bottom: 40px;
+	color: #0daa1e;
 }
