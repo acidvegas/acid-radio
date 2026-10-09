@@ -41,6 +41,9 @@ RADIO_URL         = 'https://radio.acid.vegas'
 USER_AGENT        = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 ANNOUNCE_INTERVAL = 14_400 # 4 hours
 COOLDOWN          = 3
+READ_TIMEOUT      = 300 # no traffic at all for this long means the link is dead
+RECONNECT_MIN     = 5
+RECONNECT_MAX     = 300
 BOT_CLIENT_ID     = 'irc-bot'
 ADMIN_MASK        = 'acidvegas!~stillfree@most.dangerous.motherfuck'
 MUSIC_DIR         = os.path.join(PROJECT_ROOT, 'music')
@@ -88,14 +91,23 @@ def api_post(path, body):
 def get_now_playing():
 	try:
 		data = api_get('/api/radio/now')
-		if not data:
+		if not data or not data.get('schedule'):
+			return None
+		server_time = data.get('server_time', 0)
+		active = None
+		for e in data['schedule']:
+			if e['pdt'] <= server_time:
+				active = e
+			else:
+				break
+		if not active:
 			return None
 		return {
-			'artist':   data['artist'],
-			'track':    data['track'],
-			'genre':    data.get('genre') or 'unknown',
-			'folder':   data.get('folder', ''),
-			'song_key': data['folder'] + '/' + data['file'],
+			'artist':   active['artist'],
+			'track':    active['track'],
+			'genre':    active.get('genre') or 'unknown',
+			'folder':   active.get('folder', ''),
+			'song_key': active['folder'] + '/' + active['file'],
 		}
 	except Exception as e:
 		print(f'[bot] get_now_playing failed: {e}', flush=True)
@@ -148,20 +160,6 @@ def format_np(np, votes, listeners):
 	)
 
 
-def format_announce(np, votes, listeners):
-	return (
-		f'🎵 '
-		f'\x02{irc_color(np["artist"], 3)}\x02 - '
-		f'{irc_color(np["track"], 7)} '
-		f'[{irc_color(np["genre"], 6)}] '
-		f'🤘 {irc_color(str(votes["up"]), 3)} '
-		f'👎 {irc_color(str(votes["down"]), 4)} '
-		f'({irc_color(str(listeners) + " listening", 14)}) '
-		f'🎵 '
-		f'\x1f{RADIO_URL}\x1f'
-	)
-
-
 def format_radio_help():
 	c  = irc_color
 	u  = '\x1f'  # underline
@@ -191,7 +189,7 @@ def parse_quoted_args(text):
 	return re.findall(r'"([^"]+)"|(\S+)', text)
 
 
-async def main():
+async def run_session(on_registered):
 	if IRC_SSL:
 		import ssl
 		ctx = ssl.create_default_context()
@@ -209,202 +207,237 @@ async def main():
 	def privmsg(text):
 		send(f'PRIVMSG {CHANNEL} :{text}')
 
-	send(f'NICK {NICK}')
-	send(f'USER {USER} 0 * :{REALNAME}')
-	await writer.drain()
-
-	joined = False
-	last_announce = 0
-	last_cmd = 0
-
-	while True:
-		line = await reader.readline()
-		if not line:
-			break
-		line = line.decode('utf-8', errors='replace').strip()
-
-		if line.startswith('PING'):
-			send('PONG' + line[4:])
-			await writer.drain()
-			continue
-
-		parts = line.split()
-
-		if not joined and len(parts) > 1 and parts[1] == '001':
-			if NICKSERV_PASSWORD:
-				send(f'PRIVMSG NickServ :IDENTIFY {NICKSERV_PASSWORD}')
-				await writer.drain()
-			await asyncio.sleep(6)
-			send(f'JOIN {CHANNEL}')
-			await writer.drain()
-			joined = True
-			last_announce = time.time()
-			continue
-
-		if joined and len(parts) > 3 and parts[1] == 'PRIVMSG' and parts[2] == CHANNEL:
-			source = parse_source(parts[0])
-			msg = line.split(' :', 1)[-1] if ' :' in line else ''
-			cmd = msg.strip()
-			now = time.time()
-			is_admin = source == ADMIN_MASK
-
-			if not is_admin and is_ignored(source, ignores):
-				continue
-
-			if cmd.startswith('@radio ') and is_admin:
-				subcmd = cmd[7:].strip()
-
-				if subcmd == 'togglevotes':
-					votes_enabled = not votes_enabled
-					state = irc_color('ENABLED', 3) if votes_enabled else irc_color('DISABLED', 4)
-					privmsg(f'🎵 Voting is now {state}')
-					await writer.drain()
-					continue
-
-				if subcmd == 'ignore':
-					if not ignores:
-						privmsg('ignore list is empty')
-					else:
-						privmsg('ignores: ' + ', '.join(ignores))
-					await writer.drain()
-					continue
-
-				if subcmd.startswith('ignore '):
-					mask = subcmd[7:].strip()
-					if mask.startswith('+'):
-						mask = mask[1:].strip()
-						if mask and mask not in ignores:
-							ignores.append(mask)
-							save_ignores(ignores)
-							privmsg(f'+ {mask}')
-						elif mask in ignores:
-							privmsg(f'{mask} already ignored')
-					elif mask.startswith('-'):
-						mask = mask[1:].strip()
-						if mask in ignores:
-							ignores.remove(mask)
-							save_ignores(ignores)
-							privmsg(f'- {mask}')
-						else:
-							privmsg(f'{mask} not in ignore list')
-					else:
-						privmsg('usage: @radio ignore [+/-]nick!user@host')
-					await writer.drain()
-					continue
-
-				if subcmd.startswith('download '):
-					args_str = subcmd[9:].strip()
-					tokens = parse_quoted_args(args_str)
-					flat = [quoted or unquoted for quoted, unquoted in tokens]
-
-					if len(flat) < 4:
-						privmsg('usage: @radio download <url> "<band>" "<song>" "<genre>"')
-						await writer.drain()
-						continue
-
-					yt_url, band, song, genre = flat[0], flat[1], flat[2], flat[3]
-
-					vid = YouTubeMP3.extract_video_id(yt_url)
-					if not vid:
-						privmsg(f'❌ cannot parse video ID from: {yt_url}')
-						await writer.drain()
-						continue
-
-					privmsg(f'⏳ downloading \x02{band}\x02 - {song} [{genre}]...')
-					await writer.drain()
-
-					try:
-						result = await downloader.download(yt_url, band, song, genre)
-					except Exception as e:
-						result = {'ok': False, 'msg': str(e)}
-
-					if result['ok']:
-						size_str = YouTubeMP3._human_size(result['size'])
-						dur_str = YouTubeMP3._human_duration(result['duration'])
-						privmsg(f'✅ \x02{band}\x02 - {song} [{genre}] ({size_str}, {dur_str})')
-					else:
-						privmsg(f'❌ {result["msg"]}')
-					await writer.drain()
-					continue
-
-			if cmd == '@radio':
-				if now - last_cmd < COOLDOWN:
-					continue
-				last_cmd = now
-				for line in format_radio_help():
-					privmsg(line)
-					await writer.drain()
-				continue
-
-			if cmd not in ('!np', '!like', '!dislike'):
-				continue
-
-			if now - last_cmd < COOLDOWN:
-				continue
-			last_cmd = now
-
-			if cmd == '!np':
-				np = get_now_playing()
-				if np:
-					votes = get_votes(np['song_key'])
-					listeners = get_listener_count()
-					privmsg(format_np(np, votes, listeners))
-				else:
-					privmsg('nothing playing right now')
-				await writer.drain()
-
-			elif cmd == '!like':
-				if not votes_enabled:
-					privmsg('voting is currently disabled')
-					await writer.drain()
-					continue
-				np = get_now_playing()
-				if not np:
-					privmsg('nothing playing right now')
-				else:
-					result = cast_vote(np['song_key'], 'up')
-					if result:
-						nick = source.split('!')[0]
-						privmsg(f'🤘 {irc_color(str(result["up"]), 3)} 👎 {irc_color(str(result["down"]), 4)}')
-						if random.random() < 0.10:
-							is_hardcore   = np['genre'] == 'Hardcore'
-							is_tony_hawks = np.get('folder', '') == 'Tony Hawks'
-							if is_hardcore and random.random() < 0.50:
-								send(f'PRIVMSG {CHANNEL} :\x01ACTION spinkicks {nick}\x01')
-							elif is_tony_hawks and random.random() < 0.50:
-								send(f'PRIVMSG {CHANNEL} :\x01ACTION \U0001f6f9 kickflips over {nick}\x01')
-							else:
-								privmsg(f'!beer {nick}')
-					else:
-						privmsg('❌ failed to cast vote')
-				await writer.drain()
-
-			elif cmd == '!dislike':
-				if not votes_enabled:
-					privmsg('voting is currently disabled')
-					await writer.drain()
-					continue
-				np = get_now_playing()
-				if not np:
-					privmsg('nothing playing right now')
-				else:
-					result = cast_vote(np['song_key'], 'down')
-					if result:
-						privmsg(f'🤘 {irc_color(str(result["up"]), 3)} 👎 {irc_color(str(result["down"]), 4)}')
-					else:
-						privmsg('❌ failed to cast vote')
-				await writer.drain()
-
-		if joined and time.time() - last_announce >= ANNOUNCE_INTERVAL:
+	async def announce_loop():
+		'''Fires on schedule instead of only when an IRC line happens to arrive.'''
+		while True:
+			await asyncio.sleep(ANNOUNCE_INTERVAL)
 			np = get_now_playing()
 			if np:
 				v = get_votes(np['song_key'])
 				listeners = get_listener_count()
-				privmsg(format_announce(np, v, listeners))
+				privmsg(format_np(np, v, listeners))
 				await writer.drain()
-			last_announce = time.time()
 
+	announcer = None
+	try:
+		send(f'NICK {NICK}')
+		send(f'USER {USER} 0 * :{REALNAME}')
+		await writer.drain()
+
+		joined = False
+		last_cmd = 0
+
+		while True:
+			line = await asyncio.wait_for(reader.readline(), timeout=READ_TIMEOUT)
+			if not line:
+				raise ConnectionError('server closed the connection')
+			line = line.decode('utf-8', errors='replace').strip()
+
+			if line.startswith('PING'):
+				send('PONG' + line[4:])
+				await writer.drain()
+				continue
+
+			parts = line.split()
+
+			if not joined and len(parts) > 1 and parts[1] == '001':
+				if NICKSERV_PASSWORD:
+					send(f'PRIVMSG NickServ :IDENTIFY {NICKSERV_PASSWORD}')
+					await writer.drain()
+				await asyncio.sleep(6)
+				send(f'JOIN {CHANNEL}')
+				await writer.drain()
+				joined = True
+				on_registered()
+				announcer = asyncio.create_task(announce_loop())
+				continue
+
+			if joined and len(parts) > 3 and parts[1] == 'PRIVMSG' and parts[2] == CHANNEL:
+				source = parse_source(parts[0])
+				msg = line.split(' :', 1)[-1] if ' :' in line else ''
+				cmd = msg.strip()
+				now = time.time()
+				is_admin = source == ADMIN_MASK
+
+				if not is_admin and is_ignored(source, ignores):
+					continue
+
+				if cmd.startswith('@radio ') and is_admin:
+					subcmd = cmd[7:].strip()
+
+					if subcmd == 'togglevotes':
+						votes_enabled = not votes_enabled
+						state = irc_color('ENABLED', 3) if votes_enabled else irc_color('DISABLED', 4)
+						privmsg(f'🎵 Voting is now {state}')
+						await writer.drain()
+						continue
+
+					if subcmd == 'ignore':
+						if not ignores:
+							privmsg('ignore list is empty')
+						else:
+							privmsg('ignores: ' + ', '.join(ignores))
+						await writer.drain()
+						continue
+
+					if subcmd.startswith('ignore '):
+						mask = subcmd[7:].strip()
+						if mask.startswith('+'):
+							mask = mask[1:].strip()
+							if mask and mask not in ignores:
+								ignores.append(mask)
+								save_ignores(ignores)
+								privmsg(f'+ {mask}')
+							elif mask in ignores:
+								privmsg(f'{mask} already ignored')
+						elif mask.startswith('-'):
+							mask = mask[1:].strip()
+							if mask in ignores:
+								ignores.remove(mask)
+								save_ignores(ignores)
+								privmsg(f'- {mask}')
+							else:
+								privmsg(f'{mask} not in ignore list')
+						else:
+							privmsg('usage: @radio ignore [+/-]nick!user@host')
+						await writer.drain()
+						continue
+
+					if subcmd.startswith('download '):
+						args_str = subcmd[9:].strip()
+						tokens = parse_quoted_args(args_str)
+						flat = [quoted or unquoted for quoted, unquoted in tokens]
+
+						if len(flat) < 4:
+							privmsg('usage: @radio download <url> "<band>" "<song>" "<genre>"')
+							await writer.drain()
+							continue
+
+						yt_url, band, song, genre = flat[0], flat[1], flat[2], flat[3]
+
+						vid = YouTubeMP3.extract_video_id(yt_url)
+						if not vid:
+							privmsg(f'❌ cannot parse video ID from: {yt_url}')
+							await writer.drain()
+							continue
+
+						privmsg(f'⏳ downloading \x02{band}\x02 - {song} [{genre}]...')
+						await writer.drain()
+
+						try:
+							result = await downloader.download(yt_url, band, song, genre)
+						except Exception as e:
+							result = {'ok': False, 'msg': str(e)}
+
+						if result['ok']:
+							size_str = YouTubeMP3._human_size(result['size'])
+							dur_str = YouTubeMP3._human_duration(result['duration'])
+							privmsg(f'✅ \x02{band}\x02 - {song} [{genre}] ({size_str}, {dur_str})')
+						else:
+							privmsg(f'❌ {result["msg"]}')
+						await writer.drain()
+						continue
+
+				if cmd == '@radio':
+					if now - last_cmd < COOLDOWN:
+						continue
+					last_cmd = now
+					for help_line in format_radio_help():
+						privmsg(help_line)
+						await writer.drain()
+					continue
+
+				if cmd not in ('!np', '!like', '!dislike'):
+					continue
+
+				if now - last_cmd < COOLDOWN:
+					continue
+				last_cmd = now
+
+				if cmd == '!np':
+					np = get_now_playing()
+					if np:
+						votes = get_votes(np['song_key'])
+						listeners = get_listener_count()
+						privmsg(format_np(np, votes, listeners))
+					else:
+						privmsg('nothing playing right now')
+					await writer.drain()
+
+				elif cmd == '!like':
+					if not votes_enabled:
+						privmsg('voting is currently disabled')
+						await writer.drain()
+						continue
+					np = get_now_playing()
+					if not np:
+						privmsg('nothing playing right now')
+					else:
+						result = cast_vote(np['song_key'], 'up')
+						if result:
+							nick = source.split('!')[0]
+							privmsg(f'🤘 {irc_color(str(result["up"]), 3)} 👎 {irc_color(str(result["down"]), 4)}')
+							if random.random() < 0.10:
+								is_hardcore   = np['genre'] == 'Hardcore'
+								is_tony_hawks = np.get('folder', '') == 'Tony Hawks'
+								if is_hardcore and random.random() < 0.50:
+									send(f'PRIVMSG {CHANNEL} :\x01ACTION spinkicks {nick}\x01')
+								elif is_tony_hawks and random.random() < 0.50:
+									send(f'PRIVMSG {CHANNEL} :\x01ACTION \U0001f6f9 kickflips over {nick}\x01')
+								else:
+									privmsg(f'!beer {nick}')
+						else:
+							privmsg('❌ failed to cast vote')
+					await writer.drain()
+
+				elif cmd == '!dislike':
+					if not votes_enabled:
+						privmsg('voting is currently disabled')
+						await writer.drain()
+						continue
+					np = get_now_playing()
+					if not np:
+						privmsg('nothing playing right now')
+					else:
+						result = cast_vote(np['song_key'], 'down')
+						if result:
+							privmsg(f'🤘 {irc_color(str(result["up"]), 3)} 👎 {irc_color(str(result["down"]), 4)}')
+						else:
+							privmsg('❌ failed to cast vote')
+					await writer.drain()
+	finally:
+		if announcer:
+			announcer.cancel()
+		writer.close()
+		try:
+			await writer.wait_closed()
+		except Exception:
+			pass
+
+
+async def main():
+	delay = RECONNECT_MIN
+	while True:
+		def registered():
+			nonlocal delay
+			delay = RECONNECT_MIN
+
+		try:
+			await run_session(registered)
+		except asyncio.TimeoutError:
+			print(f'[bot] no traffic for {READ_TIMEOUT}s, reconnecting', flush=True)
+		except (OSError, ConnectionError, EOFError) as e:
+			print(f'[bot] connection lost: {e}', flush=True)
+		except Exception as e:
+			print(f'[bot] session error: {type(e).__name__}: {e}', flush=True)
+
+		print(f'[bot] reconnecting in {delay}s', flush=True)
+		await asyncio.sleep(delay)
+		delay = min(delay * 2, RECONNECT_MAX)
 
 
 if __name__ == '__main__':
-	asyncio.run(main())
+	try:
+		asyncio.run(main())
+	except KeyboardInterrupt:
+		pass

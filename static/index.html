@@ -6,14 +6,14 @@
 	<title>RADIO</title>
 	<meta name="theme-color" content="#0daa1e">
 	<link rel="manifest" href="/manifest.json">
-	<link rel="preconnect" href="https://fonts.googleapis.com">
-	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-	<link href="https://fonts.googleapis.com/css2?family=Rubik+Glitch&family=Bebas+Neue&display=swap" rel="stylesheet">
+	<link rel="preload" href="/fonts/rubikglitch-latin.woff2" as="font" type="font/woff2" crossorigin>
+	<link rel="preload" href="/fonts/bebasneue-latin.woff2" as="font" type="font/woff2" crossorigin>
 	<link rel="stylesheet" href="/radio.css">
 </head>
 <body>
 	<div id="reconnect" class="hidden">DISCONNECTED — RECONNECTING...</div>
 	<div id="buffering" class="hidden">BUFFERING...</div>
+	<div id="skipping" class="hidden">SKIPPING...</div>
 	<div id="top-bar">
 		<div id="hxc-btn" class="debug-btn hidden" title="HXC">🤘</div>
 		<div id="thps-btn" class="debug-btn hidden" title="THPS">🛹</div>
@@ -60,6 +60,7 @@
 			</div>
 			<span id="time-total">0:00</span>
 		</div>
+		<div id="lyrics" class="hidden"><div id="lyrics-inner"></div></div>
 		<div id="votes">
 			<button id="vote-up" class="vote-btn" title="thumbs up">
 				<span class="vote-emoji">🤘</span>
@@ -79,6 +80,7 @@
 	<video id="bg-video" muted playsinline></video>
 	<video id="bg-video2" muted playsinline></video>
 	<audio id="audio"></audio>
+	<script src="/hls.min.js"></script>
 	<script src="/radio.js"></script>
 </body>
 </html>
