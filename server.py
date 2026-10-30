@@ -159,12 +159,16 @@ STATIC_ROUTES = {
     '/manifest.json':                           'manifest.json',
     '/icon-192.png':                            'icon-192.png',
     '/icon-512.png':                            'icon-512.png',
+    '/apple-touch-icon.png':                    'apple-touch-icon.png',
+    '/favicon.ico':                             'favicon.ico',
+    '/og.png':                                  'og.png',
     '/hls.min.js':                              'hls.min.js',
 }
 
 MIME_TYPES['.gif']  = 'image/gif'
 MIME_TYPES['.png']  = 'image/png'
 MIME_TYPES['.jpg']  = 'image/jpeg'
+MIME_TYPES['.ico']  = 'image/x-icon'
 MIME_TYPES['.mp4']  = 'video/mp4'
 MIME_TYPES['.json']  = 'application/json'
 MIME_TYPES['.m3u8']  = 'application/vnd.apple.mpegurl'
