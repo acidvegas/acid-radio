@@ -16,4 +16,4 @@ docker system prune -af
 docker build --no-cache -t acid-radio .
 
 # Run the Docker container
-docker run -d --name acid-radio --restart unless-stopped -p 127.0.0.1:7000:7000 -v "$PWD/music:/app/music" -v "$PWD/data:/app/data" acid-radio
+docker run -d --name acid-radio --restart unless-stopped --user 10001:10001 -p 127.0.0.1:7000:7000 -v "$PWD/music:/app/music" -v "$PWD/data:/app/data" acid-radio
