@@ -1,10 +1,50 @@
-# ACID RADIO
+<h1 align="center">
+  <img src=".github/logo.png" alt="ACID RADIO" width="620">
+</h1>
 
-A self-hosted internet radio station with a web UI, vote system, and IRC bot. Built with pure Python and vanilla JavaScript — no frameworks, no build steps, no npm. Drop your music in a folder and go.
+<p align="center"><b>Self-hosted internet radio with a web player, listener voting and an IRC bot.</b></p>
+
+<p align="center">
+  <a href="https://radio.acid.vegas"><img src="https://img.shields.io/badge/listen-radio.acid.vegas-0daa1e?style=for-the-badge" alt="Listen now"></a>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/python-3-3776ab?logo=python&logoColor=white" alt="Python 3">
+  <img src="https://img.shields.io/badge/ffmpeg-required-007808?logo=ffmpeg&logoColor=white" alt="ffmpeg">
+  <img src="https://img.shields.io/badge/stream-HLS%20AAC%20128k-0daa1e" alt="HLS AAC 128k">
+  <img src="https://img.shields.io/badge/docker-ready-2496ed?logo=docker&logoColor=white" alt="Docker">
+  <img src="https://img.shields.io/badge/frontend-vanilla%20JS-f7df1e?logo=javascript&logoColor=black" alt="Vanilla JS">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-ISC-0daa1e" alt="ISC License"></a>
+</p>
+
+<p align="center">
+  <a href="#setup">Setup</a> ·
+  <a href="#how-it-works">How it works</a> ·
+  <a href="#api-endpoints">API</a> ·
+  <a href="#irc-bot">IRC bot</a> ·
+  <a href="#reverse-proxy">Reverse proxy</a>
+</p>
+
+A self-hosted internet radio station with a web UI, vote system, and IRC bot. Built with pure Python and vanilla JavaScript: no frameworks, no build steps, no npm. Drop your music in a folder and go.
+
+The live station runs at **[radio.acid.vegas](https://radio.acid.vegas)**, playing hardcore, heavy and punk 24/7.
+
+## Features
+
+- **One shared live stream.** A single HLS stream for everyone, so every listener hears the same song at the same moment.
+- **Smart shuffle** that works through your whole library before repeating an artist.
+- **Voting** on every track, stored in SQLite.
+- **Vote to skip** with probability scaling and an hourly limit.
+- **Synced lyrics** from `.lrc` files, karaoke style.
+- **Car mode** for patchy signal, holding about 40 seconds of audio in reserve.
+- **Live listener count** with nothing identifying exposed.
+- **Volume boost** up to 200%.
+- **IRC bot** for now playing, voting and announcements.
+- **Hot library reloads**, no restart needed to add or remove music.
 
 ## Setup
 
-The server requires Python 3, [mutagen](https://pypi.org/project/mutagen/) for reading tags, and **ffmpeg** *(both `ffmpeg` and `ffprobe`)* — ffmpeg encodes the live stream, so it is a hard requirement, not just a helper for reading durations. Install the dependency and run:
+The server requires Python 3, [mutagen](https://pypi.org/project/mutagen/) for reading tags, and **ffmpeg** *(both `ffmpeg` and `ffprobe`)*. ffmpeg encodes the live stream, so it is a hard requirement, not just a helper for reading durations. Install the dependency and run:
 
 ```
 pip install mutagen
@@ -13,15 +53,23 @@ python3 server.py
 
 The server listens on port 7000 by default. Place your music in a `music/` directory next to `server.py`, organized as `music/Artist Name/track.mp3`. Supported formats are mp3, flac, ogg, wav, m4a, opus, and aac.
 
-Running with `-d` or `--debug` reveals the admin controls in the web UI *(skip, genre jump, artist jump)*. Note that the buttons are only the UI half — the endpoints behind them are restricted by network location regardless of this flag, see [Admin Controls](#admin-controls).
+Running with `-d` or `--debug` reveals the admin controls in the web UI *(skip, genre jump, artist jump)*. Note that the buttons are only the UI half: the endpoints behind them are restricted by network location regardless of this flag, see [Admin Controls](#admin-controls).
 
 ```
 python3 server.py --debug
 ```
 
+### Docker
+
+`setup.sh` builds the image and runs it as an unprivileged user, publishing port 7000 on `127.0.0.1` only. The `music/` and `data/` directories are mounted from the repo directory so your library, votes and stream segments live outside the container. Run it again to rebuild after pulling changes.
+
+```
+./setup.sh
+```
+
 ## How It Works
 
-The server decodes one track at a time to raw PCM and pipes it into a long-running ffmpeg process that encodes a single continuous **HLS live stream** *(AAC, 128kbps, 4-second segments)*. Every listener pulls the same segments, so everyone hears the same song at the same position — there are no individual streams or playlists.
+The server decodes one track at a time to raw PCM and pipes it into a long-running ffmpeg process that encodes a single continuous **HLS live stream** *(AAC, 128kbps, 4-second segments)*. Every listener pulls the same segments, so everyone hears the same song at the same position. There are no individual streams or playlists.
 
 Track boundaries are published separately from the audio. The server keeps a schedule of upcoming tracks, each stamped with the wall-clock time at which it enters the stream, derived from the exact count of PCM bytes fed to the encoder. The client reads the `EXT-X-PROGRAM-DATE-TIME` of whatever segment it is currently playing and matches it against that schedule. This means the displayed artist and track stay correct no matter how far behind the live edge a listener is buffered.
 
@@ -39,7 +87,7 @@ Listeners can thumbs-up or thumbs-down the current track. Votes are persisted to
 
 ### Vote to Skip
 
-The skip button lets listeners collectively vote to skip a song. The system uses probability scaling — the more people who vote, the higher the chance it actually skips:
+The skip button lets listeners collectively vote to skip a song. The system uses probability scaling: the more people who vote, the higher the chance it actually skips:
 
 | Skip Votes | Chance |
 |:----------:|:------:|
@@ -56,11 +104,11 @@ The skip button lets listeners collectively vote to skip a song. The system uses
 
 A global limit of 3 successful skips per hour prevents abuse. When the limit is reached, the skip button hides entirely until the cooldown passes. Each listener can only vote to skip once per song.
 
-Because the cut happens at the encoder — which is well ahead of what anyone is actually hearing — a successful skip takes effect roughly 20 to 60 seconds later depending on how deeply buffered you are. The UI shows a `SKIPPING...` indicator in the meantime so the delay doesn't read as a failure.
+Because the cut happens at the encoder, which is well ahead of what anyone is actually hearing, a successful skip takes effect roughly 20 to 60 seconds later depending on how deeply buffered you are. The UI shows a `SKIPPING...` indicator in the meantime so the delay doesn't read as a failure.
 
 ### Synced Lyrics
 
-Drop an `.lrc` file next to a track — same name, `.lrc` extension — and the player shows karaoke-style scrolling lyrics with the current line highlighted. Tracks without one simply don't show the panel.
+Drop an `.lrc` file next to a track *(same name, `.lrc` extension)* and the player shows karaoke-style scrolling lyrics with the current line highlighted. Tracks without one simply don't show the panel.
 
 Standard timestamped LRC is expected:
 
@@ -73,7 +121,7 @@ Standard timestamped LRC is expected:
 
 The server parses the file into `{"t": seconds, "text": ...}` and caches it against the file's mtime. Lines carrying several timestamps *(repeated choruses)* expand into one entry per timestamp, and untimestamped metadata tags are ignored.
 
-Sync is driven by the same clock as the progress bar — the position derived from the stream's `EXT-X-PROGRAM-DATE-TIME` — so lyrics stay aligned no matter how far behind the live edge a listener is buffered. Lyrics are hidden in car mode.
+Sync is driven by the same clock as the progress bar *(the position derived from the stream's `EXT-X-PROGRAM-DATE-TIME`)*, so lyrics stay aligned no matter how far behind the live edge a listener is buffered. Lyrics are hidden in car mode.
 
 ### Car Mode
 
@@ -85,7 +133,7 @@ The player also backs off exponentially on network errors and stops retrying ent
 
 ### Listener Count
 
-The server tracks active listeners by session ID. Each browser tab generates a unique session on load, and the server prunes any session that hasn't polled in 15 seconds. The count is displayed on both the splash page and the player, updating every 10 seconds. No IP addresses or identifying information are ever exposed to clients — the API only returns a number.
+The server tracks active listeners by session ID. Each browser tab generates a unique session on load, and the server prunes any session that hasn't polled in 15 seconds. The count is displayed on both the splash page and the player, updating every 10 seconds. No IP addresses or identifying information are ever exposed to clients; the API only returns a number.
 
 ### Volume Boost
 
@@ -99,19 +147,19 @@ All endpoints return JSON unless otherwise noted.
 
 | Endpoint | Description |
 |:---------|:------------|
-| `/api/radio/now?sid=` | The track schedule — a list of entries, each with `artist`, `track`, `genre`, `folder`, `file`, `duration` and `pdt` *(the wall-clock time that track enters the stream)*, plus `server_time`. The `sid` parameter registers the session as an active listener. |
+| `/api/radio/now?sid=` | The track schedule: a list of entries, each with `artist`, `track`, `genre`, `folder`, `file`, `duration` and `pdt` *(the wall-clock time that track enters the stream)*, plus `server_time`. The `sid` parameter registers the session as an active listener. |
 | `/api/radio/listeners` | Active listener count. Returns `{"count": N}`. |
 | `/api/radio/votes?song=&client=` | Vote counts and the client's current vote for a song. |
 | `/api/radio/lyrics?song=` | Timestamped lyrics for a track as `{"lines": [{"t", "text"}]}`, or an empty list when it has no `.lrc`. `song` is `folder/file.mp3`. |
 | `/api/radio/skip-info?ts=&client=` | Skip vote count, whether the client has voted, and remaining hourly skips. `ts` is the track's `pdt`. |
-| `/api/debug` | Returns `{"debug": bool, "admin": bool}` — whether debug mode is on, and whether *this* caller is allowed to use the admin endpoints. The UI shows the admin buttons only when both are true. |
+| `/api/debug` | Returns `{"debug": bool, "admin": bool}`: whether debug mode is on, and whether *this* caller is allowed to use the admin endpoints. The UI shows the admin buttons only when both are true. |
 | `/stream/playlist.m3u8` | The HLS media playlist. `/stream/segN.ts` serves the segments. |
 
 ### Admin Controls
 
-These three are restricted to the loopback address, private networks *(10/8, 172.16/12, 192.168/16)* and the Tailscale CGNAT range *(100.64/10)*. Requests arriving from a public address get a 403 regardless of whether `--debug` is set — the flag only controls whether the buttons are visible.
+These three are restricted to the loopback address, private networks *(10/8, 172.16/12, 192.168/16)* and the Tailscale CGNAT range *(100.64/10)*. Requests arriving from a public address get a 403 regardless of whether `--debug` is set. The flag only controls whether the buttons are visible.
 
-The check reads `X-Real-IP`, which nginx overwrites with the true peer address, so it cannot be forged by a client. A request with no such header is treated as local, which is only reachable by a process on the host itself since the port binds to `127.0.0.1`.
+The check reads `X-Real-IP`, which nginx overwrites with the true peer address, so it cannot be forged by a client. A request with no such header is treated as local, which is only reachable by a process on the host itself when the port is published on `127.0.0.1`, as `setup.sh` does.
 
 | Endpoint | Description |
 |:---------|:------------|
@@ -138,7 +186,7 @@ It connects to `irc.supernets.org` on port 6697 *(SSL)*, joins `#superbowl` 6 se
 
 | Command | Description |
 |:--------|:------------|
-| `!np` | Now playing — artist, track, genre, vote counts, and listener count. |
+| `!np` | Now playing: artist, track, genre, vote counts, and listener count. |
 | `!like` | Vote up the current song. |
 | `!dislike` | Vote down the current song. |
 | `@radio` | Show the help banner. |
@@ -156,7 +204,7 @@ Every 4 hours, the bot announces the currently playing song with the listener co
 
 ## Reverse Proxy
 
-If you're running behind nginx with SSL *(recommended)*, point your domain at the server:
+If you're running behind nginx with SSL *(recommended)*, point your domain at the server. The config used for radio.acid.vegas is in [radio.acid.vegas.conf](radio.acid.vegas.conf):
 
 ```nginx
 server {
